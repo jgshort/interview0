@@ -1,0 +1,44 @@
+version: 0.2
+
+env:
+  shell: bash
+  variables:
+    # Simple flag to prevent local execution of terraform:
+    AWS_CODEBUILD_EXEC: "TRUE"
+    # Terraform state location:
+    TERRAFORM_BUCKET: "fakecompany-test-project"
+  secrets-manager:
+    # Secrets for the terraform role:
+    TERRAFORM_PROVIDER_ROLE: "terraform_ci_cd_access:TERRAFORM_PROVIDER_ROLE"
+    TERRAFORM_ACCESS_KEY_ID: "terraform_ci_cd_access:TERRAFORM_ACCESS_KEY_ID"
+    TERRAFORM_SECRET_ACCESS_KEY: "terraform_ci_cd_access:TERRAFORM_SECRET_ACCESS_KEY"
+    TERRAFORM_CODEPIPELINE_ARN: "terraform_ci_cd_access:TERRAFORM_CODEPIPELINE_ARN"
+    TERRAFORM_CODECOMMIT_ARN: "terraform_ci_cd_access:TERRAFORM_CODECOMMIT_ARN"
+    TERRAFORM_ACCOUNT_NUMBER: "terraform_ci_cd_access:TERRAFORM_ACCOUNT_NUMBER"
+
+phases:
+  install:
+    on-failure: ABORT
+    commands:
+      # Add a user for building so we're not running as root:
+      - useradd -m fakecompanybuild
+      - chown -R fakecompanybuild ${CODEBUILD_SRC_DIR}
+      - chmod u+x ${CODEBUILD_SRC_DIR}/scripts/terraform
+      - yum -y install yum-plugin-security
+      - yum -y update --security
+      - yum install -y yum-utils
+      # Install terraform:
+      - yum-config-manager --add-repo https://rpm.releases.hashicorp.com/AmazonLinux/hashicorp.repo
+      - yum -y install terraform
+      - pip3 install --upgrade awscli
+
+  build:
+    # Run our scripts as the fakecompanybuild user created during 'install':
+    run-as: fakecompanybuild
+    on-failure: ABORT
+    commands:
+      - pushd ${CODEBUILD_SRC_DIR}/terraform
+      # Keep terraform logic inside the terraform script and keep it out of YAML:
+      # We could, later, pass arguments based on environment variables or other...
+      - ../scripts/terraform
+

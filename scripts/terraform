@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+set -e
+
+if [ -z "$AWS_CODEBUILD_EXEC" ]; then
+  printf "Do not execute locally; trigger with CodeBuild."
+  exit 1
+fi
+
+# We could pass this in via parameters; hardcode for now:
+ENVIRONMENT="prod"
+
+export AWS_DEFAULT_REGION="us-east-2"
+
+VAR_FILE="$ENVIRONMENT.tfvars"
+export AWS_ACCESS_KEY_ID="$TERRAFORM_ACCESS_KEY_ID"
+export AWS_SECRET_ACCESS_KEY="$TERRAFORM_SECRET_ACCESS_KEY"
+
+pushd $CODEBUILD_SRC_DIR
+  # Zip up the queue data lambda for deployment; this should be in a script.
+  zip -roX9 fakecompany-queue-data.zip lambdas/fakecompany-queue-data
+  zip -roX9 fakecompany-persist-data.zip lambdas/fakecompany-persist-data
+popd
+
+# Verify Terraform:
+terraform fmt -check -diff -recursive
+
+# Initialize Terraform with the secret keys from Secrets Manager:
+terraform init \
+  -input='false' \
+  -backend-config "access_key=$AWS_ACCESS_KEY_ID" \
+  -backend-config "secret_key=$AWS_SECRET_ACCESS_KEY" \
+  -backend-config "bucket=$TERRAFORM_BUCKET" \
+
+printf "creating $ENVIRONMENT workspace..."
+terraform workspace new $ENVIRONMENT || echo "$ENVIRONMENT already exists"
+
+printf "selecting $ENVIRONMENT workspace..."
+terraform workspace select $ENVIRONMENT
+
+printf "validating..."
+terraform validate
+
+printf "getting..."
+terraform get
+
+printf "planning..."
+terraform plan \
+  -var-file=$VAR_FILE \
+  -var "terraform_provider_role=$TERRAFORM_PROVIDER_ROLE" \
+  -var "codepipeline_arn=$TERRAFORM_CODEPIPELINE_ARN" \
+  -var "codecommit_arn=$TERRAFORM_CODECOMMIT_ARN" \
+  -var "account_number=$TERRAFORM_ACCOUNT_NUMBER" \
+  -out=terraform.plan
+
+#********************************************************************************
+# To Apply:
+#printf "applying..."
+#terraform apply \
+#  terraform.plan
+
+#********************************************************************************
+# To Destroy:
+# printf "destroying..."
+# terraform destroy \
+#  -var-file=$VAR_FILE \
+#  -var "terraform_provider_role=$TERRAFORM_PROVIDER_ROLE" \
+#  -var "codepipeline_arn=$TERRAFORM_CODEPIPELINE_ARN" \
+#  -var "codecommit_arn=$TERRAFORM_CODECOMMIT_ARN" \
+#  -var "account_number=$TERRAFORM_ACCOUNT_NUMBER" \
+

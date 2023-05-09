@@ -1,0 +1,3 @@
+project     = "fakecompany"
+environment = "prod"
+
